@@ -10834,3 +10834,38 @@ DROP TABLE t1;
 #
 # End of 11.6 tests
 #
+#
+# MDEV-41246 "Illegal mix of collations" on the mysql.user view
+#
+SET NAMES utf8mb3 COLLATE utf8mb3_general_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb3 COLLATE utf8mb3_general_mysql500_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb3 COLLATE utf8mb3_bin;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES DEFAULT;
+# End of 11.8 tests

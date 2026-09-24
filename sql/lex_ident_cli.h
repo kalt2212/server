@@ -64,13 +64,21 @@ public:
   bool is_8bit() const { return m_is_8bit; }
   bool is_quoted() const { return m_quote != '\0'; }
   char quote() const { return m_quote; }
-  // Get string repertoire by the 8-bit flag and the character set
+  /*
+    Get the string repertoire. If the string is not 8-bit and the character
+    set is ASCII-based, then the string is scanned to detect its actual
+    repertoire (e.g. ASCII_ALNUM). Otherwise, the full repertoire is returned.
+  */
   my_repertoire_t repertoire(CHARSET_INFO *cs) const
   {
     return !m_is_8bit && my_charset_is_ascii_based(cs) ?
-           MY_REPERTOIRE_ASCII : MY_REPERTOIRE_UNICODE30;
+           my_string_repertoire(cs, str, length) : MY_REPERTOIRE_UNICODE30;
   }
-  // Get string repertoire by the 8-bit flag, for ASCII-based character sets
+  /*
+    Get the string repertoire by the 8-bit flag only, for ASCII-based
+    character sets, without scanning the string:
+    either the coarse MY_REPERTOIRE_ASCII or the full repertoire.
+  */
   my_repertoire_t repertoire() const
   {
     return !m_is_8bit ? MY_REPERTOIRE_ASCII : MY_REPERTOIRE_UNICODE30;

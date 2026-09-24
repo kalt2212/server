@@ -8524,3 +8524,74 @@ SET NAMES utf8;
 #
 # End of 10.9 tests
 #
+#
+# MDEV-41246 "Illegal mix of collations" on the mysql.user view
+#
+SET NAMES utf8mb4;
+SET collation_connection=utf16_unicode_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb4;
+SET collation_connection=utf16_czech_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb4;
+SET collation_connection=utf16_uca1400_ai_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb4;
+SET collation_connection=utf16_uca1400_ai_cs;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb4;
+SET collation_connection=utf16_uca1400_as_ci;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES utf8mb4;
+SET collation_connection=utf16_uca1400_as_cs;
+SELECT c FROM v_tailoring WHERE c='Y';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y_';
+c
+Y
+SELECT c FROM v_tailoring WHERE c<>'Y+';
+c
+Y
+SET NAMES DEFAULT;
+# End of 11.8 tests
