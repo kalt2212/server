@@ -639,27 +639,44 @@ static bool store_db_ddl(THD *thd, HASH *db_name_hash, String &script,
 
 /*
   @brief
-    Append the @arg json to sql_script, by escaping only backslash,
-    and single quote
+    Append @arg json to sql_script as the body of a single-quoted string
+    literal.
+
+  @detail
+    The literal is written with NO_BACKSLASH_ESCAPES in effect: the
+    generated script switches sql_mode around the literal (see
+    dump_sql_script()), so it is in effect when the script is replayed, and
+    a backslash inside the literal stands for itself and needs no escaping.
+
+    This is what keeps the backslashes in the text of the literal identical
+    to the backslashes in the JSON it carries. The context is read back in
+    two ways: by running the script, which lets the SQL parser produce the
+    JSON, and by picking the literal out of INFORMATION_SCHEMA.OPTIMIZER_CONTEXT
+    with a regexp, which does not. Escaping backslashes here would leave
+    those two forms one escaping level apart, and a context extracted the
+    second way would no longer match the ranges the optimizer prints - see
+    Optimizer_context_replay::infuse_multi_range_read_info_const().
+
+    A single quote is then the only character that could still end the
+    literal. Write it as its JSON escape \u0027 instead of doubling it, so
+    that no SQL-level escaping is left at all. In JSON a quote can only
+    occur inside a string, where \u0027 denotes the very same character.
+
+  @return
+    false  OK
+    true   Out of memory
 */
-static void escape_json_for_sql_literal(const String& json, String *sql_script)
+static bool append_json_as_sql_literal(const String& json, String *sql_script)
 {
   const char *str= json.ptr();
   const char *end= str + json.length();
   for (; str < end; str++)
   {
-    switch (*str)
-    {
-    case '\\':
-      sql_script->append(STRING_WITH_LEN("\\\\"));
-      break;
-    case '\'':
-      sql_script->append(STRING_WITH_LEN("\\'"));
-      break;
-    default:
-      sql_script->append(*str);
-    }
+    if (*str == '\'' ? sql_script->append(STRING_WITH_LEN("\\u0027"))
+                     : sql_script->append(*str))
+      return true;
   }
+  return false;
 }
 
 bool store_optimizer_context(THD *thd)
@@ -931,13 +948,41 @@ bool Optimizer_context_recorder::dump_sql_script(THD* thd, String &sql_script)
   sql_script.append(sys_vars_script);
   sql_script.append(qry_ctx_script);
 
+  /*
+    Store the context so that the literal below reads back as the JSON
+    itself, both when this script is run and when the literal is picked out
+    of INFORMATION_SCHEMA.OPTIMIZER_CONTEXT directly. That needs the
+    backslashes in the JSON to be taken literally, so turn off backslash
+    escapes for this one statement, and put sql_mode back right after.
+    sql_mode has to be switched with a statement of its own (rather than,
+    say, "SET STATEMENT sql_mode=... FOR set @opt_context=...") because
+    sql_mode affects how the lexer tokenizes the very statement that sets
+    @opt_context, while SET STATEMENT only takes effect after that
+    statement has already been parsed.
+
+    Note that the whole sql_mode is replaced, not added to. If the "set
+    @opt_context" statement below fails and the replay stops there (for
+    example with "source" in an interactive client, which leaves the
+    session open), the restoring "set sql_mode" statement never runs and
+    the session is left with sql_mode='NO_BACKSLASH_ESCAPES'; restore it
+    from @opt_ctx_sql_mode. A replay that carries on after the error runs
+    the restoring statement right away.
+
+    The "set @opt_ctx_sql_mode" statement also marks where the preceding
+    statements end, for tools that parse the script, so keep its name.
+  */
+  sql_script.append(STRING_WITH_LEN(
+      "set @opt_ctx_sql_mode=@@sql_mode, "
+      "sql_mode='NO_BACKSLASH_ESCAPES';\n"));
+
   sql_script.append(STRING_WITH_LEN("set @opt_context=\'\n"));
 
-  // require extra escaping of the opt_ctx so as to counter the
-  // unescaping done by sql parse
-  escape_json_for_sql_literal(*ctx_writer.output.get_string(), &sql_script);
+  if ((res= append_json_as_sql_literal(*ctx_writer.output.get_string(),
+                                       &sql_script)))
+    goto end;
 
-  sql_script.append(STRING_WITH_LEN("\n\';#opt_context_ends\n\n"));
+  sql_script.append(STRING_WITH_LEN("\n\';#opt_context_ends\n"));
+  sql_script.append(STRING_WITH_LEN("set sql_mode=@opt_ctx_sql_mode;\n\n"));
   sql_script.append(
       STRING_WITH_LEN("SET optimizer_replay_context=\'opt_context\'"));
   sql_script.append(STRING_WITH_LEN(";\n\n"));
@@ -1122,6 +1167,26 @@ const uchar *Optimizer_context_recorder::get_tbl_ctx_key(const void *entry_,
   return reinterpret_cast<const uchar *>(entry->name);
 }
 
+/*
+  @brief
+    Print the min/max keys of a records_in_range() call the way they are
+    recorded in / replayed from the optimizer context.
+*/
+static void print_records_in_range_keys(const TABLE *tbl,
+                                        const KEY_PART_INFO *key_part,
+                                        uint keynr, const key_range *min_range,
+                                        const key_range *max_range,
+                                        String *min_key, String *max_key)
+{
+  DBUG_ASSERT(min_range && max_range);
+  Field::imagetype image_type=
+      Field::image_type(tbl->key_info[keynr].algorithm);
+  print_key_value(min_key, key_part, min_range->key, min_range->length,
+                  image_type);
+  print_key_value(max_key, key_part, max_range->key, max_range->length,
+                  image_type);
+}
+
 void Optimizer_context_recorder::record_records_in_range(
     const TABLE *tbl, const KEY_PART_INFO *key_part,
     uint keynr, const key_range *min_range, const key_range *max_range,
@@ -1136,8 +1201,8 @@ void Optimizer_context_recorder::record_records_in_range(
   rec_in_range_ctx->keynr= keynr;
   String min_key;
   String max_key;
-  print_key_value(&min_key, key_part, min_range->key, min_range->length);
-  print_key_value(&max_key, key_part, max_range->key, max_range->length);
+  print_records_in_range_keys(tbl, key_part, keynr, min_range, max_range,
+                              &min_key, &max_key);
 
   if (!(rec_in_range_ctx->min_key= strdup_root(mem_root, &min_key)))
     return; // OOM
@@ -1754,6 +1819,11 @@ bool Optimizer_context_replay::infuse_multi_range_read_info_const(
   const char *idx_name= keyinfo->name.str;
   const KEY_PART_INFO *key_part= keyinfo->key_part;
   uint n_key_parts= table->actual_n_key_parts(keyinfo);
+  /*
+    SEL_ARG_RANGE_SEQ (whose key_parts already holds this value) is only
+    forward-declared here, so recompute it instead of reaching into *seq.
+  */
+  Field::imagetype image_type= Field::image_type(keyinfo->algorithm);
   KEY_MULTI_RANGE multi_range;
   range_seq_t seq_it;
   List<Multi_range_read_const_call_record> mrr_const_calls;
@@ -1766,7 +1836,7 @@ bool Optimizer_context_replay::infuse_multi_range_read_info_const(
   while (!seq_if->next(seq_it, &multi_range))
   {
     StringBuffer<128> range_info(system_charset_info);
-    print_range(&range_info, key_part, &multi_range, n_key_parts);
+    print_range(&range_info, key_part, &multi_range, n_key_parts, image_type);
     char *r1= range_info.c_ptr_safe();
     text_ranges.push_back(strdup_root(thd->mem_root, &range_info));
     act_ranges.append(r1, strlen(r1));
@@ -1971,8 +2041,8 @@ bool Optimizer_context_replay::infuse_records_in_range(
   String min_key;
   String max_key;
   String tbl_name;
-  print_key_value(&min_key, key_part, min_range->key, min_range->length);
-  print_key_value(&max_key, key_part, max_range->key, max_range->length);
+  print_records_in_range_keys(tbl, key_part, keynr, min_range, max_range,
+                              &min_key, &max_key);
   append_base_table_name(tbl, &tbl_name);
 
   if (table_context_for_replay *tbl_ctx=
