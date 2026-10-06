@@ -280,14 +280,122 @@ static inline int32 int4net(const void *p)
 }
 
 /*
-  Some macros for reading doubles and floats (clean, do not assume alignment)
-  These are defined in big_endian.h and  little_endian.h
-*/
-#ifdef WORDS_BIGENDIAN
-#include "big_endian.h"
-#else
-#include "little_endian.h"
-#endif
+  Functions and macros for reading and storing floating point numbers, and
+  16-bit and 32-bit integers in the native byte order. They have no alignment
+  requirement.
 
+  The float4*() and float8*() ones use the little-endian byte order on any
+  host. The *_be() variants use the big-endian byte order.
+
+  The *get() macros assign to their first argument, so they pass its address
+  to a function. This also checks the type of the argument at compile time.
+  The value is copied through a pointer, and not returned, to keep every bit
+  of a NaN. On 32-bit x86 a returned float or double passes through an x87
+  register, which may change a signalling NaN.
+*/
+static inline void float4store(void *to, float v)
+{
+  uint32 u;
+  memcpy(&u, &v, sizeof(u));
+  int4store(to, u);
+}
+
+static inline void my_float4get(float *to, const void *from)
+{
+  uint32 u= uint4korr(from);
+  memcpy(to, &u, sizeof(u));
+}
+
+static inline void float8store(void *to, double v)
+{
+  uint64 u;
+  memcpy(&u, &v, sizeof(u));
+  int8store(to, u);
+}
+
+static inline void my_float8get(double *to, const void *from)
+{
+  uint64 u= uint8korr(from);
+  memcpy(to, &u, sizeof(u));
+}
+
+static inline void float4store_be(void *to, float v)
+{
+  uint32 u;
+  memcpy(&u, &v, sizeof(u));
+  u= my_htobe32(u);
+  memcpy(to, &u, sizeof(u));
+}
+
+static inline void my_float4get_be(float *to, const void *from)
+{
+  uint32 u;
+  memcpy(&u, from, sizeof(u));
+  u= my_betoh32(u);
+  memcpy(to, &u, sizeof(u));
+}
+
+static inline void float8store_be(void *to, double v)
+{
+  uint64 u;
+  memcpy(&u, &v, sizeof(u));
+  u= my_htobe64(u);
+  memcpy(to, &u, sizeof(u));
+}
+
+static inline void my_float8get_be(double *to, const void *from)
+{
+  uint64 u;
+  memcpy(&u, from, sizeof(u));
+  u= my_betoh64(u);
+  memcpy(to, &u, sizeof(u));
+}
+
+#define float4get(V,M)    my_float4get(&(V), (M))
+#define float8get(V,M)    my_float8get(&(V), (M))
+#define float4get_be(V,M) my_float4get_be(&(V), (M))
+#define float8get_be(V,M) my_float8get_be(&(V), (M))
+
+static inline uint16 my_ushortget(const void *p)
+{
+  uint16 ret;
+  memcpy(&ret, p, sizeof(ret));
+  return ret;
+}
+
+static inline int16 my_shortget(const void *p)
+{
+  int16 ret;
+  memcpy(&ret, p, sizeof(ret));
+  return ret;
+}
+
+static inline int32 my_longget(const void *p)
+{
+  int32 ret;
+  memcpy(&ret, p, sizeof(ret));
+  return ret;
+}
+
+static inline void shortstore(void *to, uint16 v)
+{
+  memcpy(to, &v, sizeof(v));
+}
+
+static inline void longstore(void *to, uint32 v)
+{
+  memcpy(to, &v, sizeof(v));
+}
+
+#define ushortget(V,M) ((V)= my_ushortget(M))
+#define shortget(V,M)  ((V)= my_shortget(M))
+#define longget(V,M)   ((V)= my_longget(M))
+
+#define floatget(V,M)      memcpy(&(V), (M), sizeof(float))
+#define doubleget(V,M)     memcpy(&(V), (M), sizeof(double))
+#define longlongget(V,M)   memcpy(&(V), (M), sizeof(ulonglong))
+#define longlongstore(T,V) memcpy((T), (const void*) &(V), sizeof(ulonglong))
+#define floatstore(T,V)    memcpy((T), (const void*) &(V), sizeof(float))
+#define doublestore(T,V)   memcpy((T), (const void*) &(V), sizeof(double))
 
 #endif /* MY_BYTEORDER_INCLUDED */
