@@ -4299,7 +4299,7 @@ String *Item_load_file::val_str(String *str)
   if (tmp_value.alloc((ulong)file_size))
     goto err;
   if ((file= mysql_file_open(key_file_loadfile,
-                             file_name->ptr(), O_RDONLY, MYF(0))) < 0)
+                             path, O_RDONLY, MYF(MY_NOSYMLINKS))) < 0)
     goto err;
   if (mysql_file_read(file, (uchar*) tmp_value.ptr(), (size_t)stat_info.st_size,
                       MYF(MY_NABP)))
